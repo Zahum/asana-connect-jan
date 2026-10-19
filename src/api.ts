@@ -79,6 +79,44 @@ export class AsanaAPI {
     );
   }
 
+  /** Fetch every page of a list endpoint (Asana returns max 100 items per page). */
+  async requestAllPages<T>(path: string, maxItems = 2000): Promise<T[]> {
+    const results: T[] = [];
+    let offset: string | null = null;
+    do {
+      const sep = path.includes("?") ? "&" : "?";
+      const url = `${BASE}${path}${sep}limit=100${offset ? `&offset=${encodeURIComponent(offset)}` : ""}`;
+      const res = await requestUrl({
+        url,
+        method: "GET",
+        headers: { Authorization: `Bearer ${this.pat}` },
+        throw: false,
+      });
+      if (res.status >= 400) {
+        throw new Error(`Asana API error ${res.status}: ${res.text}`);
+      }
+      const json = res.json as { data: T[]; next_page?: { offset: string } | null };
+      results.push(...json.data);
+      offset = json.next_page?.offset ?? null;
+    } while (offset && results.length < maxItems);
+    return results;
+  }
+
+  /** All non-archived projects in a workspace (paginated). */
+  async getAllProjects(workspaceGid: string): Promise<AsanaProject[]> {
+    return this.requestAllPages<AsanaProject>(
+      `/projects?workspace=${workspaceGid}&archived=false&opt_fields=gid,name,color,permalink_url`
+    );
+  }
+
+  /** All tasks in a project (paginated). Set includeCompleted=false to get open tasks only. */
+  async getAllProjectTasks(projectGid: string, includeCompleted: boolean): Promise<AsanaTask[]> {
+    const completedFilter = includeCompleted ? "" : "&completed_since=now";
+    return this.requestAllPages<AsanaTask>(
+      `/projects/${projectGid}/tasks?opt_fields=${TASK_FIELDS}${completedFilter}`
+    );
+  }
+
   async getWorkspaces(): Promise<AsanaWorkspace[]> {
     const me = await this.getMe();
     return me.workspaces;

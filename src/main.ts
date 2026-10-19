@@ -7,6 +7,7 @@ import { TaskEmbedRenderer } from "./renderers/TaskEmbedRenderer";
 import { TaskListRenderer } from "./renderers/TaskListRenderer";
 import { CreateTaskModal } from "./modals/CreateTaskModal";
 import { TaskSearchModal } from "./modals/TaskSearchModal";
+import { pickTaskFromProject } from "./modals/ProjectTaskPicker";
 import { ASANA_TASK_VIEW_TYPE, AsanaTaskView } from "./views/TaskListView";
 
 export default class AsanaPlugin extends Plugin {
@@ -86,6 +87,28 @@ export default class AsanaPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "pick-project-and-embed-task",
+      name: "Pick project and embed task block",
+      editorCallback: async (editor) => {
+        const cursor = editor.getCursor();
+        const task = await pickTaskFromProject(this.app, this.settings);
+        if (!task) return;
+        editor.replaceRange(`\`\`\`asana-task\n${task.gid}\n\`\`\`\n`, cursor);
+      },
+    });
+
+    this.addCommand({
+      id: "pick-project-and-insert-link",
+      name: "Pick project and insert task link",
+      editorCallback: async (editor) => {
+        const cursor = editor.getCursor();
+        const task = await pickTaskFromProject(this.app, this.settings);
+        if (!task) return;
+        editor.replaceRange(`[${task.name}](${task.permalink_url})`, cursor);
+      },
+    });
+
+    this.addCommand({
       id: "link-note-to-task",
       name: "Link this note to an Asana task",
       checkCallback: (checking) => {
@@ -137,7 +160,11 @@ export default class AsanaPlugin extends Plugin {
     this.addSettingTab(new AsanaSettingTab(this.app, this));
 
     this.app.workspace.onLayoutReady(() => {
-      if (this.settings.pat && this.settings.defaultWorkspaceGid) {
+      if (
+        this.settings.openSidebarOnStartup &&
+        this.settings.pat &&
+        this.settings.defaultWorkspaceGid
+      ) {
         void this.activateSidebar();
       }
     });

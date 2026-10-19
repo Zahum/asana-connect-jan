@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => AsanaPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian8 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 
 // src/api.ts
 var import_obsidian = require("obsidian");
@@ -84,6 +84,42 @@ var AsanaAPI = class {
   async getProjects(workspaceGid) {
     return this.request(
       `/projects?workspace=${workspaceGid}&opt_fields=gid,name,color,permalink_url&limit=100`
+    );
+  }
+  /** Fetch every page of a list endpoint (Asana returns max 100 items per page). */
+  async requestAllPages(path, maxItems = 2e3) {
+    var _a, _b;
+    const results = [];
+    let offset = null;
+    do {
+      const sep = path.includes("?") ? "&" : "?";
+      const url = `${BASE}${path}${sep}limit=100${offset ? `&offset=${encodeURIComponent(offset)}` : ""}`;
+      const res = await (0, import_obsidian.requestUrl)({
+        url,
+        method: "GET",
+        headers: { Authorization: `Bearer ${this.pat}` },
+        throw: false
+      });
+      if (res.status >= 400) {
+        throw new Error(`Asana API error ${res.status}: ${res.text}`);
+      }
+      const json = res.json;
+      results.push(...json.data);
+      offset = (_b = (_a = json.next_page) == null ? void 0 : _a.offset) != null ? _b : null;
+    } while (offset && results.length < maxItems);
+    return results;
+  }
+  /** All non-archived projects in a workspace (paginated). */
+  async getAllProjects(workspaceGid) {
+    return this.requestAllPages(
+      `/projects?workspace=${workspaceGid}&archived=false&opt_fields=gid,name,color,permalink_url`
+    );
+  }
+  /** All tasks in a project (paginated). Set includeCompleted=false to get open tasks only. */
+  async getAllProjectTasks(projectGid, includeCompleted) {
+    const completedFilter = includeCompleted ? "" : "&completed_since=now";
+    return this.requestAllPages(
+      `/projects/${projectGid}/tasks?opt_fields=${TASK_FIELDS}${completedFilter}`
     );
   }
   async getWorkspaces() {
@@ -192,6 +228,12 @@ var AsanaSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    new import_obsidian2.Setting(containerEl).setName("Open My Tasks sidebar on startup").setDesc("Open the Asana sidebar automatically when Obsidian starts. You can always open it from the ribbon icon or the command palette.").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.openSidebarOnStartup).onChange(async (value) => {
+        this.plugin.settings.openSidebarOnStartup = value;
+        await this.plugin.saveSettings();
+      })
+    );
     new import_obsidian2.Setting(containerEl).setName("Task list refresh interval (seconds)").setDesc("How often the task list sidebar auto-refreshes. Set to 0 to disable.").addText(
       (text) => text.setPlaceholder("300").setValue(String(this.plugin.settings.taskListRefreshInterval)).onChange(async (value) => {
         const n = parseInt(value);
@@ -213,7 +255,8 @@ var DEFAULT_SETTINGS = {
   defaultProjectName: "",
   defaultAssignee: "me",
   showCompletedTasks: false,
-  taskListRefreshInterval: 300
+  taskListRefreshInterval: 300,
+  openSidebarOnStartup: false
 };
 
 // src/renderers/TaskEmbedRenderer.ts
@@ -596,10 +639,113 @@ var TaskSearchModal = class extends import_obsidian6.SuggestModal {
   }
 };
 
-// src/views/TaskListView.ts
+// src/modals/ProjectTaskPicker.ts
 var import_obsidian7 = require("obsidian");
-var ASANA_TASK_VIEW_TYPE = "asana-task-view";
-var AsanaTaskView = class extends import_obsidian7.ItemView {
+var Picker = class extends import_obsidian7.FuzzySuggestModal {
+  constructor(app, items, label, placeholder, resolve, detail) {
+    super(app);
+    this.items = items;
+    this.label = label;
+    this.resolve = resolve;
+    this.detail = detail;
+    this.chosen = false;
+    this.setPlaceholder(placeholder);
+  }
+  getItems() {
+    return this.items;
+  }
+  getItemText(item) {
+    return this.label(item);
+  }
+  renderSuggestion(match, el) {
+    var _a;
+    el.createEl("div", { text: this.label(match.item) });
+    const extra = (_a = this.detail) == null ? void 0 : _a.call(this, match.item);
+    if (extra)
+      el.createEl("small", { text: extra, cls: "asana-picker-detail" });
+  }
+  onChooseItem(item) {
+    this.chosen = true;
+    this.resolve(item);
+  }
+  onClose() {
+    super.onClose();
+    window.setTimeout(() => {
+      if (!this.chosen)
+        this.resolve(null);
+    }, 0);
+  }
+};
+function pick(app, items, label, placeholder, detail) {
+  return new Promise((resolve) => {
+    new Picker(app, items, label, placeholder, resolve, detail).open();
+  });
+}
+async function pickTaskFromProject(app, settings) {
+  if (!settings.pat) {
+    new import_obsidian7.Notice("Asana: add your Personal Access Token in the plugin settings first.");
+    return null;
+  }
+  const api = new AsanaAPI(settings.pat);
+  try {
+    const workspaces = await api.getWorkspaces();
+    let workspace = null;
+    if (workspaces.length === 1) {
+      workspace = workspaces[0];
+    } else if (workspaces.length > 1) {
+      const sorted = [...workspaces].sort(
+        (a, b) => a.gid === settings.defaultWorkspaceGid ? -1 : b.gid === settings.defaultWorkspaceGid ? 1 : 0
+      );
+      workspace = await pick(app, sorted, (w) => w.name, "Choose an Asana workspace\u2026");
+    }
+    if (!workspace)
+      return null;
+    const loadingProjects = new import_obsidian7.Notice(`Loading projects in ${workspace.name}\u2026`, 0);
+    let projects;
+    try {
+      projects = await api.getAllProjects(workspace.gid);
+    } finally {
+      loadingProjects.hide();
+    }
+    if (projects.length === 0) {
+      new import_obsidian7.Notice(`No projects found in ${workspace.name}.`);
+      return null;
+    }
+    projects.sort((a, b) => a.name.localeCompare(b.name));
+    const project = await pick(app, projects, (p) => p.name, `Choose a project in ${workspace.name}\u2026`);
+    if (!project)
+      return null;
+    const loadingTasks = new import_obsidian7.Notice(`Loading tasks in ${project.name}\u2026`, 0);
+    let tasks;
+    try {
+      tasks = await api.getAllProjectTasks(project.gid, settings.showCompletedTasks);
+    } finally {
+      loadingTasks.hide();
+    }
+    if (tasks.length === 0) {
+      new import_obsidian7.Notice(`No ${settings.showCompletedTasks ? "" : "open "}tasks in ${project.name}.`);
+      return null;
+    }
+    return await pick(
+      app,
+      tasks,
+      (t) => t.completed ? `\u2713 ${t.name}` : t.name,
+      `Search tasks in ${project.name}\u2026`,
+      (t) => {
+        var _a;
+        return [(_a = t.assignee) == null ? void 0 : _a.name, t.due_on ? `due ${t.due_on}` : null].filter(Boolean).join(" \xB7 ");
+      }
+    );
+  } catch (e) {
+    new import_obsidian7.Notice("Asana: " + errorMessage(e));
+    return null;
+  }
+}
+
+// src/views/TaskListView.ts
+var import_obsidian8 = require("obsidian");
+var ASANA_TASK_VIEW_TYPE = "asana-connect-jan-task-view";
+var AsanaTaskView = class extends import_obsidian8.ItemView {
   constructor(leaf, getSettings) {
     super(leaf);
     this.getSettings = getSettings;
@@ -679,7 +825,7 @@ var AsanaTaskView = class extends import_obsidian7.ItemView {
       cls: "asana-icon-btn",
       title: "Refresh"
     });
-    (0, import_obsidian7.setIcon)(refreshBtn, "refresh-cw");
+    (0, import_obsidian8.setIcon)(refreshBtn, "refresh-cw");
     refreshBtn.addEventListener("click", () => {
       void this.refresh();
     });
@@ -756,13 +902,13 @@ var AsanaTaskView = class extends import_obsidian7.ItemView {
       li.toggleClass("asana-item-done", checkbox.checked);
     } catch (e) {
       checkbox.checked = !checkbox.checked;
-      new import_obsidian7.Notice("Failed to update task: " + errorMessage(e));
+      new import_obsidian8.Notice("Failed to update task: " + errorMessage(e));
     }
   }
 };
 
 // src/main.ts
-var AsanaPlugin = class extends import_obsidian8.Plugin {
+var AsanaPlugin = class extends import_obsidian9.Plugin {
   async onload() {
     await this.loadSettings();
     this.registerView(ASANA_TASK_VIEW_TYPE, (leaf) => {
@@ -831,10 +977,35 @@ ${task.gid}
       }
     });
     this.addCommand({
+      id: "pick-project-and-embed-task",
+      name: "Pick project and embed task block",
+      editorCallback: async (editor) => {
+        const cursor = editor.getCursor();
+        const task = await pickTaskFromProject(this.app, this.settings);
+        if (!task)
+          return;
+        editor.replaceRange(`\`\`\`asana-task
+${task.gid}
+\`\`\`
+`, cursor);
+      }
+    });
+    this.addCommand({
+      id: "pick-project-and-insert-link",
+      name: "Pick project and insert task link",
+      editorCallback: async (editor) => {
+        const cursor = editor.getCursor();
+        const task = await pickTaskFromProject(this.app, this.settings);
+        if (!task)
+          return;
+        editor.replaceRange(`[${task.name}](${task.permalink_url})`, cursor);
+      }
+    });
+    this.addCommand({
       id: "link-note-to-task",
       name: "Link this note to an Asana task",
       checkCallback: (checking) => {
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
         if (!view)
           return false;
         if (checking)
@@ -848,7 +1019,7 @@ ${task.gid}
             fm["asana-task-url"] = task.permalink_url;
             fm["asana-task-name"] = task.name;
           });
-          new import_obsidian8.Notice(`Note linked to: ${task.name}`);
+          new import_obsidian9.Notice(`Note linked to: ${task.name}`);
         }).open();
         return true;
       }
@@ -857,7 +1028,7 @@ ${task.gid}
       id: "sync-linked-task",
       name: "Sync linked Asana task status",
       checkCallback: (checking) => {
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
         if (!(view == null ? void 0 : view.file))
           return false;
         if (checking)
@@ -870,7 +1041,7 @@ ${task.gid}
       id: "complete-linked-task",
       name: "Complete linked Asana task",
       checkCallback: (checking) => {
-        const view = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
         if (!(view == null ? void 0 : view.file))
           return false;
         if (checking)
@@ -884,7 +1055,7 @@ ${task.gid}
     });
     this.addSettingTab(new AsanaSettingTab(this.app, this));
     this.app.workspace.onLayoutReady(() => {
-      if (this.settings.pat && this.settings.defaultWorkspaceGid) {
+      if (this.settings.openSidebarOnStartup && this.settings.pat && this.settings.defaultWorkspaceGid) {
         void this.activateSidebar();
       }
     });
@@ -911,7 +1082,7 @@ ${task.gid}
     const fm = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
     const gid = fm == null ? void 0 : fm["asana-task-gid"];
     if (!gid) {
-      new import_obsidian8.Notice("No Asana task linked to this note. Use 'Link this note to an Asana task' first.");
+      new import_obsidian9.Notice("No Asana task linked to this note. Use 'Link this note to an Asana task' first.");
       return;
     }
     try {
@@ -924,9 +1095,9 @@ ${task.gid}
         f["asana-due-on"] = (_a2 = task.due_on) != null ? _a2 : "";
         f["asana-assignee"] = (_c = (_b = task.assignee) == null ? void 0 : _b.name) != null ? _c : "";
       });
-      new import_obsidian8.Notice(`Synced: ${task.name} (${task.completed ? "completed" : "open"})`);
+      new import_obsidian9.Notice(`Synced: ${task.name} (${task.completed ? "completed" : "open"})`);
     } catch (e) {
-      new import_obsidian8.Notice("Sync failed: " + errorMessage(e));
+      new import_obsidian9.Notice("Sync failed: " + errorMessage(e));
     }
   }
   async toggleLinkedTaskComplete(file, complete) {
@@ -934,7 +1105,7 @@ ${task.gid}
     const fm = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
     const gid = fm == null ? void 0 : fm["asana-task-gid"];
     if (!gid) {
-      new import_obsidian8.Notice("No Asana task linked to this note.");
+      new import_obsidian9.Notice("No Asana task linked to this note.");
       return;
     }
     try {
@@ -943,9 +1114,9 @@ ${task.gid}
       await this.app.fileManager.processFrontMatter(file, (f) => {
         f["asana-task-completed"] = task.completed;
       });
-      new import_obsidian8.Notice(`Task marked ${task.completed ? "open" : "complete"}: ${task.name}`);
+      new import_obsidian9.Notice(`Task marked ${task.completed ? "open" : "complete"}: ${task.name}`);
     } catch (e) {
-      new import_obsidian8.Notice("Failed: " + errorMessage(e));
+      new import_obsidian9.Notice("Failed: " + errorMessage(e));
     }
   }
 };

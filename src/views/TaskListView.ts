@@ -3,7 +3,7 @@ import { AsanaAPI } from "../api";
 import { errorMessage } from "../errors";
 import { AsanaPluginSettings, AsanaTask } from "../types";
 
-export const ASANA_TASK_VIEW_TYPE = "asana-task-view";
+export const ASANA_TASK_VIEW_TYPE = "asana-connect-jan-task-view";
 
 export class AsanaTaskView extends ItemView {
   private tasks: AsanaTask[] = [];

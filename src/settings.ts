@@ -122,6 +122,16 @@ export class AsanaSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("Open My Tasks sidebar on startup")
+      .setDesc("Open the Asana sidebar automatically when Obsidian starts. You can always open it from the ribbon icon or the command palette.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.openSidebarOnStartup).onChange(async (value) => {
+          this.plugin.settings.openSidebarOnStartup = value;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
       .setName("Task list refresh interval (seconds)")
       .setDesc("How often the task list sidebar auto-refreshes. Set to 0 to disable.")
       .addText((text) =>

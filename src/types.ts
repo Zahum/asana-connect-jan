@@ -61,6 +61,7 @@ export interface AsanaPluginSettings {
   defaultAssignee: string;
   showCompletedTasks: boolean;
   taskListRefreshInterval: number;
+  openSidebarOnStartup: boolean;
 }
 
 export const DEFAULT_SETTINGS: AsanaPluginSettings = {
@@ -72,6 +73,7 @@ export const DEFAULT_SETTINGS: AsanaPluginSettings = {
   defaultAssignee: "me",
   showCompletedTasks: false,
   taskListRefreshInterval: 300,
+  openSidebarOnStartup: false,
 };
 
 export interface AsanaFrontmatter {

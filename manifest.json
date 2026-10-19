@@ -1,9 +1,9 @@
 {
-  "id": "asana-connect",
-  "name": "Asana Connect",
-  "version": "1.0.1",
+  "id": "asana-connect-jan",
+  "name": "Asana Connect (Jan)",
+  "version": "1.1.0",
   "minAppVersion": "1.7.2",
-  "description": "Embed, create, and sync tasks from Asana. Supports any workspace or project.",
+  "description": "Fork of Asana Connect: adds project picker for embedding tasks from any project, optional sidebar on startup.",
   "author": "notenerd",
   "authorUrl": "",
   "fundingUrl": "",
