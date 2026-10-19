@@ -1,3 +1,35 @@
+# Asana Connect (Jan's fork)
+
+> **This is a fork of [Asana Connect](https://github.com/NoteNerdOfficial/asana-connect) by [NoteNerd](https://github.com/NoteNerdOfficial).**
+> A big thank-you to the original author for building and open-sourcing this plugin. The task embeds, live lists, sidebar and task creation are all their work; this fork only adds a few things on top. If you don't need the features below, please use the original.
+
+## What's new in this fork
+
+### Pick project → embed task
+Two new commands let you insert tasks from **any project in any workspace**, not only from the default workspace's search:
+
+- `Pick project and embed task block` — inserts an `asana-task` code block
+- `Pick project and insert task link` — inserts `[Task name](url)`
+
+Flow: choose a workspace (skipped if you have only one) → choose a project → type to filter its tasks. Projects and tasks are loaded in full (paginated), so large workspaces work too. Completed tasks are shown only when *Show completed tasks in lists* is enabled. Unlike the built-in search, this doesn't use Asana's search API, which as far as I know requires a paid Asana plan.
+
+### Sidebar no longer opens automatically
+New setting **Open My Tasks sidebar on startup** (off by default). The sidebar is still one click away via the ribbon icon or the command palette.
+
+### Separate plugin ID
+The fork uses the ID `asana-connect-jan` ("Asana Connect (Jan)"), so it never gets overwritten by updates to the original. **Don't enable both plugins at once**: they share the same `asana-task` / `asana-tasks` code blocks. Your existing blocks keep working when you switch.
+
+### Installing this fork
+1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](../../releases/latest).
+2. Put them in `<your vault>/.obsidian/plugins/asana-connect-jan/`.
+3. In Obsidian: Settings → Community plugins → disable *Asana Connect* (if installed) → enable *Asana Connect (Jan)* → paste your token and click Connect.
+
+Alternatively, install via [BRAT](https://github.com/TfTHacker/obsidian42-brat) using this repository's URL.
+
+---
+
+*Original documentation follows.*
+
 # Asana Connect
 
 Embed, create, search, and sync Asana tasks directly inside Obsidian. Works with any Asana workspace or project.
@@ -147,4 +179,4 @@ npm run build  # production bundle
 
 ## License
 
-MIT — see LICENSE.
+MIT — see LICENSE. Original work © NoteNerd; fork changes released under the same license.
