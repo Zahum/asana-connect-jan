@@ -6,6 +6,7 @@ import {
   AsanaProject,
   CreateTaskParams,
 } from "./types";
+import { AsanaApiError } from "./errors";
 
 const BASE = "https://app.asana.com/api/1.0";
 const TASK_FIELDS =
@@ -37,7 +38,7 @@ export class AsanaAPI {
       throw: false,
     });
     if (res.status >= 400) {
-      throw new Error(`Asana API error ${res.status}: ${res.text}`);
+      throw new AsanaApiError(res.status, res.text);
     }
     const json = res.json as AsanaEnvelope<T>;
     return json.data;
@@ -93,7 +94,7 @@ export class AsanaAPI {
         throw: false,
       });
       if (res.status >= 400) {
-        throw new Error(`Asana API error ${res.status}: ${res.text}`);
+        throw new AsanaApiError(res.status, res.text);
       }
       const json = res.json as { data: T[]; next_page?: { offset: string } | null };
       results.push(...json.data);

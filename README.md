@@ -16,6 +16,9 @@ Flow: choose a workspace (skipped if you have only one) → choose a project →
 ### Sidebar no longer opens automatically
 New setting **Open My Tasks sidebar on startup** (off by default). The sidebar is still one click away via the ribbon icon or the command palette.
 
+### Friendly handling of deleted tasks
+If a task embedded in a note gets deleted in Asana (or you lose access to it), the block no longer shows a raw red API error. Instead you get a calm box saying the task no longer exists, with its ID and a **Remove block** button that deletes the dead code block from the note in one click.
+
 ### Separate plugin ID
 The fork uses the ID `asana-connect-jan` ("Asana Connect (Jan)"), so it never gets overwritten by updates to the original. **Don't enable both plugins at once**: they share the same `asana-task` / `asana-tasks` code blocks. Your existing blocks keep working when you switch.
 

@@ -21,7 +21,7 @@ export default class AsanaPlugin extends Plugin {
     });
 
     this.registerMarkdownCodeBlockProcessor("asana-task", (source, el, ctx) => {
-      const renderer = new TaskEmbedRenderer(el, source, this.settings);
+      const renderer = new TaskEmbedRenderer(el, source, this.settings, this.app, ctx);
       ctx.addChild(renderer);
     });
 

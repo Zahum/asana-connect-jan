@@ -1,13 +1,15 @@
-import { MarkdownRenderChild } from "obsidian";
+import { App, MarkdownPostProcessorContext, MarkdownRenderChild, Notice, TFile } from "obsidian";
 import { AsanaAPI } from "../api";
-import { errorMessage } from "../errors";
+import { AsanaApiError, errorMessage } from "../errors";
 import { AsanaPluginSettings, AsanaTask } from "../types";
 
 export class TaskEmbedRenderer extends MarkdownRenderChild {
   constructor(
     containerEl: HTMLElement,
     private source: string,
-    private settings: AsanaPluginSettings
+    private settings: AsanaPluginSettings,
+    private app?: App,
+    private ctx?: MarkdownPostProcessorContext
   ) {
     super(containerEl);
   }
@@ -31,7 +33,60 @@ export class TaskEmbedRenderer extends MarkdownRenderChild {
       this.containerEl.empty();
       this.renderTask(task);
     } catch (e) {
-      this.renderError(errorMessage(e));
+      if (e instanceof AsanaApiError && (e.status === 404 || e.status === 403)) {
+        this.renderMissing(this.resolveGid(this.source.trim()) ?? this.source.trim());
+      } else {
+        this.renderError(errorMessage(e));
+      }
+    }
+  }
+
+  /** Shown when the task was deleted in Asana or you no longer have access to it. */
+  renderMissing(gid: string) {
+    this.containerEl.empty();
+    const box = this.containerEl.createDiv({ cls: "asana-missing" });
+    const text = box.createDiv({ cls: "asana-missing-text" });
+    text.createSpan({ text: "\u{1F5D1} This Asana task no longer exists (deleted, or you lost access)." });
+    text.createEl("small", { text: `Task ID: ${gid}`, cls: "asana-missing-id" });
+
+    if (this.app && this.ctx) {
+      const btn = box.createEl("button", { text: "Remove block", cls: "asana-missing-remove" });
+      btn.addEventListener("click", () => {
+        void this.removeBlock(gid, btn);
+      });
+    }
+  }
+
+  /** Deletes this code block from the note, after checking the lines still match. */
+  async removeBlock(gid: string, btn: HTMLButtonElement) {
+    if (!this.app || !this.ctx) return;
+    const info = this.ctx.getSectionInfo(this.containerEl);
+    const file = this.app.vault.getAbstractFileByPath(this.ctx.sourcePath);
+    if (!info || !(file instanceof TFile)) {
+      new Notice("Couldn't locate this block — please delete it manually.");
+      return;
+    }
+    btn.disabled = true;
+    let removed = false;
+    await this.app.vault.process(file, (content) => {
+      const lines = content.split("\n");
+      const block = lines.slice(info.lineStart, info.lineEnd + 1).join("\n");
+      // safety: only delete if the lines are still an asana-task block for this task
+      if (!/^\s*```+\s*asana-task\b/.test(lines[info.lineStart] ?? "") || !block.includes(gid)) {
+        return content;
+      }
+      let count = info.lineEnd - info.lineStart + 1;
+      // also drop one empty line that directly follows the block (inserted by the embed commands)
+      if (lines[info.lineEnd + 1] !== undefined && lines[info.lineEnd + 1].trim() === "") count++;
+      lines.splice(info.lineStart, count);
+      removed = true;
+      return lines.join("\n");
+    });
+    if (removed) {
+      new Notice("Removed embed of deleted Asana task.");
+    } else {
+      btn.disabled = false;
+      new Notice("The note changed since this block was rendered — please delete it manually.");
     }
   }
 

@@ -308,3 +308,31 @@
   content: " *";
   color: var(--color-red);
 }
+
+/* Fork: embed of a task that was deleted in Asana */
+.asana-missing {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
+
+.asana-missing-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.asana-missing-id {
+  color: var(--text-faint);
+}
+
+.asana-missing-remove {
+  flex-shrink: 0;
+  font-size: 0.9em;
+}

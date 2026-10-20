@@ -1,7 +1,7 @@
 {
   "id": "asana-connect-jan",
   "name": "Asana Connect (Jan)",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "minAppVersion": "1.7.2",
   "description": "Fork of Asana Connect: adds project picker for embedding tasks from any project, optional sidebar on startup.",
   "author": "notenerd (fork by Jan)",

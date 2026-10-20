@@ -31,6 +31,20 @@ var import_obsidian9 = require("obsidian");
 
 // src/api.ts
 var import_obsidian = require("obsidian");
+
+// src/errors.ts
+function errorMessage(e) {
+  return e instanceof Error ? e.message : String(e);
+}
+var AsanaApiError = class extends Error {
+  constructor(status, body) {
+    super(`Asana API error ${status}: ${body}`);
+    this.status = status;
+    this.name = "AsanaApiError";
+  }
+};
+
+// src/api.ts
 var BASE = "https://app.asana.com/api/1.0";
 var TASK_FIELDS = "gid,name,notes,completed,due_on,assignee.name,assignee.gid,projects.gid,projects.name,tags.gid,tags.name,permalink_url,created_at,modified_at,custom_fields.gid,custom_fields.name,custom_fields.display_value";
 var AsanaAPI = class {
@@ -51,7 +65,7 @@ var AsanaAPI = class {
       throw: false
     });
     if (res.status >= 400) {
-      throw new Error(`Asana API error ${res.status}: ${res.text}`);
+      throw new AsanaApiError(res.status, res.text);
     }
     const json = res.json;
     return json.data;
@@ -101,7 +115,7 @@ var AsanaAPI = class {
         throw: false
       });
       if (res.status >= 400) {
-        throw new Error(`Asana API error ${res.status}: ${res.text}`);
+        throw new AsanaApiError(res.status, res.text);
       }
       const json = res.json;
       results.push(...json.data);
@@ -155,11 +169,6 @@ var AsanaAPI = class {
     return match ? match[1] : null;
   }
 };
-
-// src/errors.ts
-function errorMessage(e) {
-  return e instanceof Error ? e.message : String(e);
-}
 
 // src/settings.ts
 var import_obsidian2 = require("obsidian");
@@ -262,15 +271,18 @@ var DEFAULT_SETTINGS = {
 // src/renderers/TaskEmbedRenderer.ts
 var import_obsidian3 = require("obsidian");
 var TaskEmbedRenderer = class extends import_obsidian3.MarkdownRenderChild {
-  constructor(containerEl, source, settings) {
+  constructor(containerEl, source, settings, app, ctx) {
     super(containerEl);
     this.source = source;
     this.settings = settings;
+    this.app = app;
+    this.ctx = ctx;
   }
   onload() {
     void this.render();
   }
   async render() {
+    var _a;
     this.containerEl.empty();
     const loading = this.containerEl.createDiv({ cls: "asana-loading" });
     loading.setText("Loading Asana task\u2026");
@@ -285,7 +297,58 @@ var TaskEmbedRenderer = class extends import_obsidian3.MarkdownRenderChild {
       this.containerEl.empty();
       this.renderTask(task);
     } catch (e) {
-      this.renderError(errorMessage(e));
+      if (e instanceof AsanaApiError && (e.status === 404 || e.status === 403)) {
+        this.renderMissing((_a = this.resolveGid(this.source.trim())) != null ? _a : this.source.trim());
+      } else {
+        this.renderError(errorMessage(e));
+      }
+    }
+  }
+  /** Shown when the task was deleted in Asana or you no longer have access to it. */
+  renderMissing(gid) {
+    this.containerEl.empty();
+    const box = this.containerEl.createDiv({ cls: "asana-missing" });
+    const text = box.createDiv({ cls: "asana-missing-text" });
+    text.createSpan({ text: "\u{1F5D1} This Asana task no longer exists (deleted, or you lost access)." });
+    text.createEl("small", { text: `Task ID: ${gid}`, cls: "asana-missing-id" });
+    if (this.app && this.ctx) {
+      const btn = box.createEl("button", { text: "Remove block", cls: "asana-missing-remove" });
+      btn.addEventListener("click", () => {
+        void this.removeBlock(gid, btn);
+      });
+    }
+  }
+  /** Deletes this code block from the note, after checking the lines still match. */
+  async removeBlock(gid, btn) {
+    if (!this.app || !this.ctx)
+      return;
+    const info = this.ctx.getSectionInfo(this.containerEl);
+    const file = this.app.vault.getAbstractFileByPath(this.ctx.sourcePath);
+    if (!info || !(file instanceof import_obsidian3.TFile)) {
+      new import_obsidian3.Notice("Couldn't locate this block \u2014 please delete it manually.");
+      return;
+    }
+    btn.disabled = true;
+    let removed = false;
+    await this.app.vault.process(file, (content) => {
+      var _a;
+      const lines = content.split("\n");
+      const block = lines.slice(info.lineStart, info.lineEnd + 1).join("\n");
+      if (!/^\s*```+\s*asana-task\b/.test((_a = lines[info.lineStart]) != null ? _a : "") || !block.includes(gid)) {
+        return content;
+      }
+      let count = info.lineEnd - info.lineStart + 1;
+      if (lines[info.lineEnd + 1] !== void 0 && lines[info.lineEnd + 1].trim() === "")
+        count++;
+      lines.splice(info.lineStart, count);
+      removed = true;
+      return lines.join("\n");
+    });
+    if (removed) {
+      new import_obsidian3.Notice("Removed embed of deleted Asana task.");
+    } else {
+      btn.disabled = false;
+      new import_obsidian3.Notice("The note changed since this block was rendered \u2014 please delete it manually.");
     }
   }
   resolveGid(raw) {
@@ -915,7 +978,7 @@ var AsanaPlugin = class extends import_obsidian9.Plugin {
       return new AsanaTaskView(leaf, () => this.settings);
     });
     this.registerMarkdownCodeBlockProcessor("asana-task", (source, el, ctx) => {
-      const renderer = new TaskEmbedRenderer(el, source, this.settings);
+      const renderer = new TaskEmbedRenderer(el, source, this.settings, this.app, ctx);
       ctx.addChild(renderer);
     });
     this.registerMarkdownCodeBlockProcessor("asana-tasks", (source, el, ctx) => {
