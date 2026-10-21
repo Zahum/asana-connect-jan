@@ -584,6 +584,9 @@ var CreateTaskModal = class extends import_obsidian5.Modal {
     this.workspaceGid = "";
     this.assignee = "";
     this.workspaces = [];
+    this.workspaceDropdown = null;
+    this.projectDropdown = null;
+    this.projectCache = /* @__PURE__ */ new Map();
     this.workspaceGid = settings.defaultWorkspaceGid;
     this.projectGid = settings.defaultProjectGid;
     this.assignee = settings.defaultAssignee;
@@ -591,7 +594,7 @@ var CreateTaskModal = class extends import_obsidian5.Modal {
   async onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: "Create Asana Task" });
+    contentEl.createEl("h2", { text: "Create Asana task" });
     void this.loadWorkspacesAndProjects();
     new import_obsidian5.Setting(contentEl).setName("Task name").setClass("asana-modal-required").addText((text) => text.setPlaceholder("Task name").setValue(this.name).onChange((v) => this.name = v));
     new import_obsidian5.Setting(contentEl).setName("Description").addTextArea(
@@ -603,14 +606,22 @@ var CreateTaskModal = class extends import_obsidian5.Modal {
     new import_obsidian5.Setting(contentEl).setName("Assignee").setDesc('Use "me" for yourself, or paste a user GID.').addText(
       (text) => text.setPlaceholder("me").setValue(this.assignee).onChange((v) => this.assignee = v)
     );
-    new import_obsidian5.Setting(contentEl).setName("Workspace GID").setDesc("Leave blank to use the default workspace.").addText(
-      (text) => text.setPlaceholder(this.settings.defaultWorkspaceGid).setValue(this.workspaceGid).onChange((v) => {
+    new import_obsidian5.Setting(contentEl).setName("Workspace").addDropdown((dd) => {
+      this.workspaceDropdown = dd;
+      dd.addOption(this.workspaceGid, this.settings.defaultWorkspaceName || "Default workspace");
+      dd.setValue(this.workspaceGid);
+      dd.onChange((v) => {
         this.workspaceGid = v;
-      })
-    );
-    new import_obsidian5.Setting(contentEl).setName("Project GID").setDesc("Optional. Leave blank for a workspace-level task.").addText(
-      (text) => text.setPlaceholder(this.settings.defaultProjectGid).setValue(this.projectGid).onChange((v) => this.projectGid = v)
-    );
+        this.projectGid = v === this.settings.defaultWorkspaceGid ? this.settings.defaultProjectGid : "";
+        void this.loadProjects(v);
+      });
+    });
+    new import_obsidian5.Setting(contentEl).setName("Project").setDesc('Optional. Choose "No project" for a task in My Tasks only.').addDropdown((dd) => {
+      this.projectDropdown = dd;
+      dd.addOption("", "Loading projects\u2026");
+      dd.setValue("");
+      dd.onChange((v) => this.projectGid = v);
+    });
     new import_obsidian5.Setting(contentEl).addButton(
       (btn) => btn.setButtonText("Create Task").setCta().onClick(async () => {
         if (!this.name.trim()) {
@@ -621,7 +632,7 @@ var CreateTaskModal = class extends import_obsidian5.Modal {
         try {
           const api = new AsanaAPI(this.settings.pat);
           const wsGid = this.workspaceGid || this.settings.defaultWorkspaceGid;
-          const projGid = this.projectGid || this.settings.defaultProjectGid;
+          const projGid = this.projectGid;
           const task = await api.createTask({
             name: this.name.trim(),
             notes: this.notes.trim() || void 0,
@@ -646,7 +657,50 @@ var CreateTaskModal = class extends import_obsidian5.Modal {
     try {
       const api = new AsanaAPI(this.settings.pat);
       this.workspaces = await api.getWorkspaces();
+      const dd = this.workspaceDropdown;
+      if (dd && this.workspaces.length > 0) {
+        dd.selectEl.empty();
+        for (const ws of this.workspaces)
+          dd.addOption(ws.gid, ws.name);
+        if (!this.workspaces.some((w) => w.gid === this.workspaceGid)) {
+          this.workspaceGid = this.workspaces[0].gid;
+        }
+        dd.setValue(this.workspaceGid);
+      }
     } catch (e) {
+    }
+    await this.loadProjects(this.workspaceGid);
+  }
+  async loadProjects(workspaceGid) {
+    const dd = this.projectDropdown;
+    if (!dd || !workspaceGid)
+      return;
+    dd.selectEl.empty();
+    dd.addOption("", "Loading projects\u2026");
+    dd.setDisabled(true);
+    try {
+      let projects = this.projectCache.get(workspaceGid);
+      if (!projects) {
+        const api = new AsanaAPI(this.settings.pat);
+        projects = (await api.getAllProjects(workspaceGid)).sort((a, b) => a.name.localeCompare(b.name));
+        this.projectCache.set(workspaceGid, projects);
+      }
+      if (workspaceGid !== this.workspaceGid)
+        return;
+      dd.selectEl.empty();
+      dd.addOption("", "\u2014 No project \u2014");
+      for (const p of projects)
+        dd.addOption(p.gid, p.name);
+      if (!projects.some((p) => p.gid === this.projectGid))
+        this.projectGid = "";
+      dd.setValue(this.projectGid);
+    } catch (e) {
+      dd.selectEl.empty();
+      dd.addOption("", "\u2014 No project (couldn't load list) \u2014");
+      this.projectGid = "";
+      new import_obsidian5.Notice("Couldn't load Asana projects: " + errorMessage(e));
+    } finally {
+      dd.setDisabled(false);
     }
   }
   onClose() {

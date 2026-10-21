@@ -21,6 +21,9 @@ If a task embedded in a note gets deleted in Asana (or you lose access to it), t
 
 ![Embed of a deleted Asana task with a Remove block button](screenshots/deleted-task-embed.png)
 
+### Project dropdown when creating tasks
+The *Create Asana task* window now lets you choose the **workspace** and **project** from dropdowns (all active projects, alphabetical) instead of typing GIDs. Your default project from settings is pre-selected; pick "No project" for a task that lives only in My Tasks.
+
 ### Separate plugin ID
 The fork uses the ID `asana-connect-jan` ("Asana Connect (Jan)"), so it never gets overwritten by updates to the original. **Don't enable both plugins at once**: they share the same `asana-task` / `asana-tasks` code blocks. Your existing blocks keep working when you switch.
 

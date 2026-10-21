@@ -1,7 +1,7 @@
-import { App, Modal, Notice, Setting } from "obsidian";
+import { App, DropdownComponent, Modal, Notice, Setting } from "obsidian";
 import { AsanaAPI } from "../api";
 import { errorMessage } from "../errors";
-import { AsanaPluginSettings, AsanaWorkspace } from "../types";
+import { AsanaPluginSettings, AsanaProject, AsanaWorkspace } from "../types";
 
 export class CreateTaskModal extends Modal {
   name = "";
@@ -11,6 +11,9 @@ export class CreateTaskModal extends Modal {
   workspaceGid = "";
   assignee = "";
   workspaces: AsanaWorkspace[] = [];
+  private workspaceDropdown: DropdownComponent | null = null;
+  private projectDropdown: DropdownComponent | null = null;
+  private projectCache = new Map<string, AsanaProject[]>();
 
   constructor(
     app: App,
@@ -26,7 +29,7 @@ export class CreateTaskModal extends Modal {
   async onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: "Create Asana Task" });
+    contentEl.createEl("h2", { text: "Create Asana task" });
 
     void this.loadWorkspacesAndProjects();
 
@@ -55,26 +58,27 @@ export class CreateTaskModal extends Modal {
       );
 
     new Setting(contentEl)
-      .setName("Workspace GID")
-      .setDesc("Leave blank to use the default workspace.")
-      .addText((text) =>
-        text
-          .setPlaceholder(this.settings.defaultWorkspaceGid)
-          .setValue(this.workspaceGid)
-          .onChange((v) => {
-            this.workspaceGid = v;
-          })
-      );
+      .setName("Workspace")
+      .addDropdown((dd) => {
+        this.workspaceDropdown = dd;
+        dd.addOption(this.workspaceGid, this.settings.defaultWorkspaceName || "Default workspace");
+        dd.setValue(this.workspaceGid);
+        dd.onChange((v) => {
+          this.workspaceGid = v;
+          this.projectGid = v === this.settings.defaultWorkspaceGid ? this.settings.defaultProjectGid : "";
+          void this.loadProjects(v);
+        });
+      });
 
     new Setting(contentEl)
-      .setName("Project GID")
-      .setDesc("Optional. Leave blank for a workspace-level task.")
-      .addText((text) =>
-        text
-          .setPlaceholder(this.settings.defaultProjectGid)
-          .setValue(this.projectGid)
-          .onChange((v) => (this.projectGid = v))
-      );
+      .setName("Project")
+      .setDesc("Optional. Choose \"No project\" for a task in My Tasks only.")
+      .addDropdown((dd) => {
+        this.projectDropdown = dd;
+        dd.addOption("", "Loading projects…");
+        dd.setValue("");
+        dd.onChange((v) => (this.projectGid = v));
+      });
 
     new Setting(contentEl).addButton((btn) =>
       btn
@@ -89,7 +93,7 @@ export class CreateTaskModal extends Modal {
           try {
             const api = new AsanaAPI(this.settings.pat);
             const wsGid = this.workspaceGid || this.settings.defaultWorkspaceGid;
-            const projGid = this.projectGid || this.settings.defaultProjectGid;
+            const projGid = this.projectGid;
             const task = await api.createTask({
               name: this.name.trim(),
               notes: this.notes.trim() || undefined,
@@ -115,8 +119,47 @@ export class CreateTaskModal extends Modal {
     try {
       const api = new AsanaAPI(this.settings.pat);
       this.workspaces = await api.getWorkspaces();
+      const dd = this.workspaceDropdown;
+      if (dd && this.workspaces.length > 0) {
+        dd.selectEl.empty();
+        for (const ws of this.workspaces) dd.addOption(ws.gid, ws.name);
+        if (!this.workspaces.some((w) => w.gid === this.workspaceGid)) {
+          this.workspaceGid = this.workspaces[0].gid;
+        }
+        dd.setValue(this.workspaceGid);
+      }
     } catch (e) {
-      // silently ignore — GID fields still work without this
+      // keep the default workspace option
+    }
+    await this.loadProjects(this.workspaceGid);
+  }
+
+  async loadProjects(workspaceGid: string) {
+    const dd = this.projectDropdown;
+    if (!dd || !workspaceGid) return;
+    dd.selectEl.empty();
+    dd.addOption("", "Loading projects…");
+    dd.setDisabled(true);
+    try {
+      let projects = this.projectCache.get(workspaceGid);
+      if (!projects) {
+        const api = new AsanaAPI(this.settings.pat);
+        projects = (await api.getAllProjects(workspaceGid)).sort((a, b) => a.name.localeCompare(b.name));
+        this.projectCache.set(workspaceGid, projects);
+      }
+      if (workspaceGid !== this.workspaceGid) return; // user switched workspace meanwhile
+      dd.selectEl.empty();
+      dd.addOption("", "— No project —");
+      for (const p of projects) dd.addOption(p.gid, p.name);
+      if (!projects.some((p) => p.gid === this.projectGid)) this.projectGid = "";
+      dd.setValue(this.projectGid);
+    } catch (e) {
+      dd.selectEl.empty();
+      dd.addOption("", "— No project (couldn't load list) —");
+      this.projectGid = "";
+      new Notice("Couldn't load Asana projects: " + errorMessage(e));
+    } finally {
+      dd.setDisabled(false);
     }
   }
 
